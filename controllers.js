@@ -30,7 +30,27 @@ const login = async (req, res) => {
     const hash = dbUser.password_hash || '';
     let match = false;
     try {
-      match = await bcrypt.compare(password, hash);
+      const isBcrypt = typeof hash === 'string' && /\$2[aby]\$/.test(hash);
+      if (isBcrypt) {
+        // Normal bcrypt verification
+        match = await bcrypt.compare(password, hash);
+      } else {
+        // Legacy / non-bcrypt handling (opt-in via env var)
+        if (process.env.ALLOW_LEGACY_PASSWORDS === 'true') {
+          console.warn(`⚠️ Legacy password comparison enabled for email: ${String(email).trim()}`);
+          // direct string compare - assumes stored hash may be plain text
+          match = String(password) === String(hash);
+        } else {
+          // Try bcrypt anyway in case of truncated/alternate formats, but do not enable legacy behavior
+          try {
+            match = await bcrypt.compare(password, hash);
+          } catch (innerErr) {
+            // ignore - will treat as no match
+            console.error('bcrypt compare error (fallback):', innerErr);
+            match = false;
+          }
+        }
+      }
     } catch (err) {
       console.error('bcrypt compare error:', err);
     }
