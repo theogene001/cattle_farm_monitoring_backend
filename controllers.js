@@ -2,102 +2,40 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { executeQuery } = require('./database');
 
-// User login
+// User login (DEVELOPMENT BYPASS)
+// This temporary implementation accepts any credentials and returns a JWT
+// containing a minimal user (viewer role). Keep only for local testing
+// and remove/replace with real auth before production.
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email } = req.body || {};
+    const userEmail = (email && String(email).trim()) || 'dev@localhost';
 
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email and password are required'
-      });
-    }
+    // Minimal user payload
+    const userPayload = {
+      id: 1,
+      email: userEmail,
+      role: 'viewer',
+      name: 'Dev User (bypass)'
+    };
 
-    // Real database
-    const result = await executeQuery(
-      'SELECT id, name, email, password_hash, role FROM users WHERE LOWER(email) = LOWER(?) AND is_active = TRUE',
-      [email]
-    );
+    const token = jwt.sign(userPayload, process.env.JWT_SECRET || 'dev-jwt-secret-change-me', {
+      expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+    });
 
-    // Optional debug logging to help diagnose 401s (enable by setting DEBUG_AUTH=1)
-    if (process.env.DEBUG_AUTH === '1') {
-      try {
-        console.debug('DEBUG_AUTH: user lookup result success=', result.success, 'rows=', result.data ? result.data.length : 0);
-      } catch (d) {
-        console.debug('DEBUG_AUTH: unable to log user lookup result');
-      }
-    }
+    console.warn('⚠️ Login bypass used: issued dev token for', userEmail);
 
-    if (!result.success || result.data.length === 0) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password'
-      });
-    }
-
-    const user = result.data[0];
-    // Compare provided password with stored hash
-    let passwordMatches = false;
-    try {
-      passwordMatches = await bcrypt.compare(password, user.password_hash);
-    } catch (e) {
-      // If bcrypt.compare throws (e.g., stored value isn't a bcrypt hash),
-      // optionally allow a plaintext comparison for development only
-      if (process.env.ALLOW_PLAINTEXT_LOGIN === '1') {
-        passwordMatches = (password === user.password_hash);
-        if (process.env.DEBUG_AUTH === '1') console.debug('DEBUG_AUTH: plaintext fallback used for user', user.email);
-      } else {
-        // keep it false and allow the handler to return 401 below
-        if (process.env.DEBUG_AUTH === '1') console.debug('DEBUG_AUTH: bcrypt compare failed and plaintext fallback disabled');
-      }
-    }
-    if (process.env.DEBUG_AUTH === '1') {
-      try {
-        console.debug('DEBUG_AUTH: password compare result=', !!passwordMatches);
-      } catch (d) {
-        /* ignore logging errors */
-      }
-    }
-    if (!user || !passwordMatches) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password'
-      });
-    }
-
-    // Generate JWT token
-    const token = jwt.sign(
-      { 
-        id: user.id, 
-        email: user.email, 
-        role: user.role,
-        name: user.name
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
-
-    res.json({
+    return res.json({
       success: true,
-      message: 'Login successful',
+      message: 'Login bypass (development) - token issued',
       data: {
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role
-        },
+        user: userPayload,
         token
       }
     });
-
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    console.error('Login bypass error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
 
