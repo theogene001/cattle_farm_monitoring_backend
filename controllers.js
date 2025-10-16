@@ -17,12 +17,27 @@ const login = async (req, res) => {
     if (!userRes.success) {
       return res.status(500).json({ success: false, message: 'Failed to query users' });
     }
+    // If LOGIN_BYPASS is enabled, skip password verification and issue a token for the user.
+    const loginBypass = process.env.LOGIN_BYPASS === 'true';
     if (!userRes.data || userRes.data.length === 0) {
-      console.warn(`Login attempt failed - user not found for email: ${String(email).trim()}`);
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
+      if (!loginBypass) {
+        console.warn(`Login attempt failed - user not found for email: ${String(email).trim()}`);
+        return res.status(401).json({ success: false, message: 'Invalid email or password' });
+      }
+      // When bypassing and user doesn't exist, create a temporary dev user payload
+      const tempUser = {
+        id: 1,
+        name: String(email).trim(),
+        email: String(email).trim(),
+        password_hash: '',
+        role: 'admin',
+        is_active: true
+      };
+      var dbUser = tempUser;
+      console.warn(`⚠️ LOGIN_BYPASS active: issuing token for non-existing user ${email}`);
+    } else {
+      var dbUser = userRes.data[0];
     }
-
-    const dbUser = userRes.data[0];
     if (!dbUser.is_active) {
       return res.status(403).json({ success: false, message: 'Account is disabled' });
     }
