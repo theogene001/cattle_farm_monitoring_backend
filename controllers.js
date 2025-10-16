@@ -38,7 +38,20 @@ const login = async (req, res) => {
 
     const user = result.data[0];
     // Compare provided password with stored hash
-    const passwordMatches = await bcrypt.compare(password, user.password_hash);
+    let passwordMatches = false;
+    try {
+      passwordMatches = await bcrypt.compare(password, user.password_hash);
+    } catch (e) {
+      // If bcrypt.compare throws (e.g., stored value isn't a bcrypt hash),
+      // optionally allow a plaintext comparison for development only
+      if (process.env.ALLOW_PLAINTEXT_LOGIN === '1') {
+        passwordMatches = (password === user.password_hash);
+        if (process.env.DEBUG_AUTH === '1') console.debug('DEBUG_AUTH: plaintext fallback used for user', user.email);
+      } else {
+        // keep it false and allow the handler to return 401 below
+        if (process.env.DEBUG_AUTH === '1') console.debug('DEBUG_AUTH: bcrypt compare failed and plaintext fallback disabled');
+      }
+    }
     if (process.env.DEBUG_AUTH === '1') {
       try {
         console.debug('DEBUG_AUTH: password compare result=', !!passwordMatches);
