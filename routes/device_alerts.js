@@ -105,33 +105,39 @@ const handleAlert = async (req, res) => {
       console.warn('Failed to check alert_type column metadata:', colErr && colErr.message ? colErr.message : colErr);
     }
 
-    // Insert into alerts table with explicit columns matching schema
-    const sql = `
-      INSERT INTO alerts (
-        farm_id, animal_id, collar_id, fence_id, alert_type, severity,
-        title, message, alert_data, location_latitude, location_longitude,
-        triggered_at, status, auto_generated
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+    // Build INSERT dynamically so we don't explicitly insert NULL into columns
+    // that rely on DB defaults (e.g. triggered_at)
+    const insertCols = [];
+    const placeholders = [];
+    const insertParams = [];
 
-    const params = [
-      farm_id,
-      animal_id,
-      collar_id,
-      fence_id,
-      alert_type,
-      severity,
-      title,
-      message,
-      alert_data,
-      location_latitude,
-      location_longitude,
-      triggered_at,
-      status,
-      auto_generated
-    ];
+    const pushCol = (col, val) => {
+      insertCols.push(col);
+      placeholders.push('?');
+      insertParams.push(val);
+    };
 
-    const result = await executeQuery(sql, params);
+    pushCol('farm_id', farm_id);
+    if (animal_id !== null) pushCol('animal_id', animal_id);
+    if (collar_id !== null) pushCol('collar_id', collar_id);
+    if (fence_id !== null) pushCol('fence_id', fence_id);
+    pushCol('alert_type', alert_type);
+    pushCol('severity', severity);
+    if (title !== undefined && title !== null) pushCol('title', title);
+    if (message !== undefined && message !== null) pushCol('message', message);
+    if (alert_data !== null) pushCol('alert_data', alert_data);
+    if (location_latitude !== null) pushCol('location_latitude', location_latitude);
+    if (location_longitude !== null) pushCol('location_longitude', location_longitude);
+    // Only include triggered_at if the device explicitly provided a value
+    if (triggered_at) {
+      pushCol('triggered_at', triggered_at);
+    }
+    pushCol('status', status);
+    pushCol('auto_generated', auto_generated);
+
+    const sql = `INSERT INTO alerts (${insertCols.join(', ')}) VALUES (${placeholders.join(', ')})`;
+
+    const result = await executeQuery(sql, insertParams);
     if (!result.success) {
       // Extra diagnostic logging to help trace truncation cause
       try {
