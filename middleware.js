@@ -11,6 +11,12 @@ const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
   const devBypass = process.env.DEV_AUTH_BYPASS === 'true';
 
+  // If session-based user exists, use it (session auth takes precedence)
+  if (req.session && req.session.user) {
+    req.user = req.session.user;
+    return next();
+  }
+
   if (!token) {
     // Global temporary bypass (overrides token requirement)
     if (TEMP_DISABLE_AUTH) {
@@ -37,7 +43,7 @@ const authenticateToken = (req, res, next) => {
     if (err) {
       if (devBypass && process.env.NODE_ENV !== 'production') {
         console.warn('⚠️ DEV_AUTH_BYPASS enabled: token invalid but allowing request (dev only) - injecting viewer user');
-        req.user = { id: 1, email: 'dev@localhost', role: 'viewer', name: 'Dev User' };
+        req.user = { id: 1, email: 'dev@localhost', role: 'viewer', name: 'Theo' };
         return next();
       }
       return res.status(403).json({

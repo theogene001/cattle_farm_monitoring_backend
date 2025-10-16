@@ -3,6 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const bcrypt = require('bcryptjs');
+const session = require('express-session');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 // Provide safe defaults for JWT config in development
@@ -56,6 +58,21 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// Session middleware - simple in-memory store for development only.
+// For production, use a persistent store like Redis, connect-mongo, or similar.
+app.use(session({
+  name: process.env.SESSION_NAME || 'cattlefarm.sid',
+  secret: process.env.SESSION_SECRET || 'dev-session-secret-change-me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000 // 1 day
+  }
+}));
 
 // Routes
 const router = express.Router();
@@ -81,6 +98,8 @@ router.post('/dashboard/animals/:id/location', optionalAuth, require('./controll
 router.get('/alerts', optionalAuth, getAlerts);
 router.patch('/alerts/:id/read', optionalAuth, markAlertRead);
 router.patch('/alerts/:id/resolve', authenticateToken, resolveAlert);
+// Admin-only: delete all alerts
+router.delete('/alerts', authenticateToken, deleteAllAlerts);
 // GPS route (public endpoint for devices)
 router.use('/gps', gpsRoute);
 // GPS stream (Server-Sent Events) for live updates

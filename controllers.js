@@ -2,39 +2,61 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { executeQuery } = require('./database');
 
-// User login (DEVELOPMENT BYPASS)
-// This temporary implementation accepts any credentials and returns a JWT
-// containing a minimal user (viewer role). Keep only for local testing
-// and remove/replace with real auth before production.
+// User login - real DB-backed authentication
+// Accepts { email, password } and authenticates against users table.
+// On success: creates a session (req.session.user) and returns a JWT + user data (without password)
 const login = async (req, res) => {
   try {
-    const { email } = req.body || {};
-    const userEmail = (email && String(email).trim()) || 'dev@localhost';
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: 'Email and password are required' });
+    }
 
-    // Minimal user payload
+    const q = 'SELECT id, name, email, password_hash, role, is_active FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1';
+    const userRes = await executeQuery(q, [String(email).trim()]);
+    if (!userRes.success) {
+      return res.status(500).json({ success: false, message: 'Failed to query users' });
+    }
+    if (!userRes.data || userRes.data.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid email or password' });
+    }
+
+    const dbUser = userRes.data[0];
+    if (!dbUser.is_active) {
+      return res.status(403).json({ success: false, message: 'Account is disabled' });
+    }
+
+    const hash = dbUser.password_hash || '';
+    let match = false;
+    try {
+      match = await bcrypt.compare(password, hash);
+    } catch (err) {
+      console.error('bcrypt compare error:', err);
+    }
+
+    if (!match) {
+      return res.status(401).json({ success: false, message: 'Invalid email or password' });
+    }
+
     const userPayload = {
-      id: 1,
-      email: userEmail,
-      role: 'viewer',
-      name: 'Dev User (bypass)'
+      id: dbUser.id,
+      email: dbUser.email,
+      name: dbUser.name || dbUser.email,
+      role: dbUser.role || 'viewer'
     };
+
+    // create session
+    if (req.session) {
+      req.session.user = userPayload;
+    }
 
     const token = jwt.sign(userPayload, process.env.JWT_SECRET || 'dev-jwt-secret-change-me', {
       expiresIn: process.env.JWT_EXPIRES_IN || '24h'
     });
 
-    console.warn('⚠️ Login bypass used: issued dev token for', userEmail);
-
-    return res.json({
-      success: true,
-      message: 'Login bypass (development) - token issued',
-      data: {
-        user: userPayload,
-        token
-      }
-    });
+    return res.json({ success: true, message: 'Login successful', data: { user: userPayload, token } });
   } catch (error) {
-    console.error('Login bypass error:', error);
+    console.error('Login error:', error);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
@@ -799,4 +821,30 @@ module.exports = {
   deleteAnimal,
   resolveAlert
   ,updateAnimalLocation
+};
+
+// Delete all alerts (truncate) - protected action
+const deleteAllAlerts = async (req, res) => {
+  try {
+    // Allow only admin users, unless DEV_ALLOW_TRUNCATE env var is set to 'true'
+    const isAdmin = req.user && req.user.role === 'admin';
+    if (!isAdmin && process.env.DEV_ALLOW_TRUNCATE !== 'true') {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+
+    // Use TRUNCATE for fast removal; fall back to DELETE if unsupported by DB
+    let result = await executeQuery('TRUNCATE TABLE alerts');
+    if (!result.success) {
+      // Try DELETE as fallback
+      result = await executeQuery('DELETE FROM alerts');
+      if (!result.success) {
+        return res.status(500).json({ success: false, message: 'Failed to clear alerts', error: result.error });
+      }
+    }
+
+    return res.json({ success: true, message: 'All alerts cleared' });
+  } catch (error) {
+    console.error('Clear alerts error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
 };
