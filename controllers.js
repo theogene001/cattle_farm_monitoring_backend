@@ -804,25 +804,6 @@ const markAlertRead = async (req, res) => {
   }
 };
 
-module.exports = {
-  login,
-  getDashboardSummary,
-  getAnimals,
-  getVirtualFences,
-  createVirtualFence,
-  updateVirtualFence,
-  deleteVirtualFence,
-  getAnimalLocations,
-  getAlerts,
-  markAlertRead,
-  getAnimalById,
-  addAnimal,
-  updateAnimal,
-  deleteAnimal,
-  resolveAlert
-  ,updateAnimalLocation
-};
-
 // Delete all alerts (truncate) - protected action
 const deleteAllAlerts = async (req, res) => {
   try {
@@ -845,6 +826,39 @@ const deleteAllAlerts = async (req, res) => {
     return res.json({ success: true, message: 'All alerts cleared' });
   } catch (error) {
     console.error('Clear alerts error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+// Export controllers (placed after function declarations to ensure all values are defined)
+module.exports = {
+  login,
+  getDashboardSummary,
+  getAnimals,
+  getVirtualFences,
+  createVirtualFence,
+  updateVirtualFence,
+  deleteVirtualFence,
+  getAnimalLocations,
+  getAlerts,
+  markAlertRead,
+  getAnimalById,
+  addAnimal,
+  updateAnimal,
+  deleteAnimal,
+  resolveAlert,
+  updateAnimalLocation,
+  deleteAllAlerts,
+  getCurrentUser
+};
+
+// Return currently authenticated user from session or token (optional)
+const getCurrentUser = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Not authenticated' });
+    return res.json({ success: true, data: { user: req.user } });
+  } catch (err) {
+    console.error('Get current user error:', err);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };

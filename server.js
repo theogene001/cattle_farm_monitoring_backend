@@ -30,6 +30,8 @@ const {
   getAnimalLocations,
   updateAnimalLocation,
   getAlerts,
+  deleteAllAlerts,
+  getCurrentUser,
   markAlertRead,
   addAnimal,
   updateAnimal,
@@ -79,6 +81,8 @@ const router = express.Router();
 
 // Public routes
 router.post('/auth/login', login);
+// Return current user (session or token)
+router.get('/auth/me', optionalAuth, getCurrentUser);
 
 // Protected routes
 router.get('/dashboard/summary', optionalAuth, getDashboardSummary);

@@ -58,15 +58,22 @@ const authenticateToken = (req, res, next) => {
 
 // Optional authentication (doesn't fail if no token)
 const optionalAuth = (req, res, next) => {
+  // Prefer session-based user when available
+  if (req.session && req.session.user) {
+    req.user = req.session.user;
+    return next();
+  }
+
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
   if (token) {
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-      if (!err) {
-        req.user = user;
-      }
-    });
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = decoded;
+    } catch (err) {
+      // ignore invalid token for optional auth
+    }
   }
   next();
 };
