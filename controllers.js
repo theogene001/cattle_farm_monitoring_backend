@@ -702,11 +702,13 @@ const getAnimalLocations = async (req, res) => {
     const currentRes = await executeQuery(
       `SELECT 
          cl.animal_id,
+         cl.collar_id,
          cl.latitude,
          cl.longitude,
          cl.recorded_at AS timestamp,
-         cl.speed_kmh,
-         cl.battery_level
+         cl.battery_level,
+         cl.signal_quality,
+         cl.temperature_celsius
        FROM current_locations cl
        JOIN animals a ON cl.animal_id = a.id
        WHERE a.farm_id = ?
