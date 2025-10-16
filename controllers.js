@@ -20,6 +20,15 @@ const login = async (req, res) => {
       [email]
     );
 
+    // Optional debug logging to help diagnose 401s (enable by setting DEBUG_AUTH=1)
+    if (process.env.DEBUG_AUTH === '1') {
+      try {
+        console.debug('DEBUG_AUTH: user lookup result success=', result.success, 'rows=', result.data ? result.data.length : 0);
+      } catch (d) {
+        console.debug('DEBUG_AUTH: unable to log user lookup result');
+      }
+    }
+
     if (!result.success || result.data.length === 0) {
       return res.status(401).json({
         success: false,
