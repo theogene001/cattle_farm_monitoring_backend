@@ -380,17 +380,8 @@ const startServer = async () => {
             console.warn('⚠️ Failed to activate existing admin user:', activateRes.error);
           }
         }
-        // Seed demo user as well for easier testing
-        const demoEmail = 'demo@cattlefarm.com';
-        const demoCheck = await executeQuery('SELECT id FROM users WHERE email = ?', [demoEmail]);
-        if (demoCheck.success && demoCheck.data.length === 0) {
-          const demoHash = bcrypt.hashSync('demo123', 12);
-          await executeQuery(
-            'INSERT INTO users (name, email, password_hash, role, is_active) VALUES (?, ?, ?, ?, TRUE)',
-            ['Demo User', demoEmail, demoHash, 'viewer']
-          );
-          console.log('✅ Seeded demo user (email: demo@cattlefarm.com, password: demo123)');
-        }
+        // Note: demo user seeding has been removed to prefer explicit user management
+        // If you want a demo user for local testing, create it manually using the scripts in /backend/scripts
 
         // Ensure default farm with id=1 exists for dashboard queries
         const adminRow = await executeQuery('SELECT id FROM users WHERE email = ?', [adminEmail]);

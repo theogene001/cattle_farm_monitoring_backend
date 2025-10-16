@@ -8,9 +8,10 @@ const authenticateToken = (req, res, next) => {
 
   if (!token) {
     if (devBypass && process.env.NODE_ENV !== 'production') {
-      console.warn('⚠️ DEV_AUTH_BYPASS enabled: allowing request without token (dev only)');
-      // Inject a default demo user for development convenience
-      req.user = { id: 1, email: 'dev@localhost', role: 'admin' };
+      // For development only: allow requests without token but inject a minimal user.
+      // Use a limited role ('viewer') to avoid accidental admin-level access during dev.
+      console.warn('⚠️ DEV_AUTH_BYPASS enabled: allowing request without token (dev only) - injecting viewer user');
+      req.user = { id: 1, email: 'dev@localhost', role: 'viewer', name: 'Dev User' };
       return next();
     }
 
@@ -23,8 +24,8 @@ const authenticateToken = (req, res, next) => {
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       if (devBypass && process.env.NODE_ENV !== 'production') {
-        console.warn('⚠️ DEV_AUTH_BYPASS enabled: token invalid but allowing request (dev only)');
-        req.user = { id: 1, email: 'dev@localhost', role: 'admin' };
+        console.warn('⚠️ DEV_AUTH_BYPASS enabled: token invalid but allowing request (dev only) - injecting viewer user');
+        req.user = { id: 1, email: 'dev@localhost', role: 'viewer', name: 'Dev User' };
         return next();
       }
       return res.status(403).json({
