@@ -9,9 +9,9 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'cattle_farm_monitoring',
   waitForConnections: true,
-  // Allow environment override for pool size; default to 5 to avoid exceeding hosted DB limits
-  // Default to 2 concurrent connections (many hosted MySQL users have low limits). Override with DB_POOL_LIMIT env var.
-  connectionLimit: parseInt(process.env.DB_POOL_LIMIT, 10) || 2,
+  // Allow environment override for pool size; default to 5 to avoid excessive queuing
+  // Many hosted MySQL users have low limits; override with DB_POOL_LIMIT env var if needed.
+  connectionLimit: parseInt(process.env.DB_POOL_LIMIT, 10) || 5,
   queueLimit: 0
 };
 

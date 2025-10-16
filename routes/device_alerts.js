@@ -4,6 +4,9 @@ const { executeQuery } = require('../database');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
+// cache for alerts.alert_type column metadata
+let _cachedAlertTypeColumnMeta = null;
+
 // Simple helper to send email using SMTP creds from env
 const sendEmail = async ({ to, subject, text, html }) => {
   const transporter = nodemailer.createTransport({
@@ -30,6 +33,7 @@ const sendEmail = async ({ to, subject, text, html }) => {
 // Accepts GET or POST. Query params: alert, distance, motion, lat, lon
 // handler function exposed for direct use by server (fallbacks)
 const handleAlert = async (req, res) => {
+  const startTime = Date.now();
   try {
     const payload = req.method === 'GET' ? req.query : req.body;
 
@@ -66,25 +70,31 @@ const handleAlert = async (req, res) => {
     const status = payload.status ? String(payload.status) : 'active';
     const auto_generated = (typeof payload.auto_generated !== 'undefined') ? Number(payload.auto_generated) : 1;
 
-    // Before inserting, verify actual DB column limits (character length and octet length)
+    // Before inserting, use cached DB column metadata (fetch once) and enforce byte-aware truncation
     try {
-      const dbName = process.env.DB_NAME || 'cattle_farm_monitoring';
-      const colRes = await executeQuery(
-        `SELECT CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, CHARACTER_SET_NAME
-         FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'alerts' AND COLUMN_NAME = 'alert_type' LIMIT 1`,
-        [dbName]
-      );
-      if (colRes.success && Array.isArray(colRes.data) && colRes.data.length > 0) {
-        const info = colRes.data[0];
+      if (!_cachedAlertTypeColumnMeta === null && !_cachedAlertTypeColumnMeta) {
+        const dbName = process.env.DB_NAME || 'cattle_farm_monitoring';
+        const colRes = await executeQuery(
+          `SELECT CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, CHARACTER_SET_NAME
+           FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'alerts' AND COLUMN_NAME = 'alert_type' LIMIT 1`,
+          [dbName]
+        );
+        if (colRes.success && Array.isArray(colRes.data) && colRes.data.length > 0) {
+          _cachedAlertTypeColumnMeta = colRes.data[0];
+        } else {
+          _cachedAlertTypeColumnMeta = null;
+        }
+      }
+
+      const info = _cachedAlertTypeColumnMeta;
+      if (info) {
         const charLimit = info.CHARACTER_MAXIMUM_LENGTH || MAX_ALERT_TYPE;
         const octetLimit = info.CHARACTER_OCTET_LENGTH || (MAX_ALERT_TYPE * 4);
         const alertChars = alert_type.length;
         const alertBytes = Buffer.byteLength(alert_type, 'utf8');
         console.debug('alert_type char/bytes:', alertChars, '/', alertBytes, 'db charLimit/octetLimit:', charLimit, '/', octetLimit, 'charset:', info.CHARACTER_SET_NAME);
-        // If the byte length exceeds octetLimit, truncate by bytes safely
         if (alertBytes > octetLimit) {
-          // Truncate by characters until byte length fits
           let truncated = alert_type;
           while (Buffer.byteLength(truncated, 'utf8') > octetLimit && truncated.length > 0) {
             truncated = truncated.substring(0, Math.max(0, truncated.length - 1));
@@ -92,13 +102,11 @@ const handleAlert = async (req, res) => {
           console.warn('Byte-aware truncated alert_type from', alertBytes, 'bytes to', Buffer.byteLength(truncated, 'utf8'), 'bytes');
           alert_type = truncated;
         }
-        // Also ensure we don't exceed character limit
         if (alert_type.length > charLimit) {
           console.warn('Char-limit truncated alert_type from', alert_type.length, 'to', charLimit);
           alert_type = alert_type.substring(0, charLimit);
         }
       } else {
-        // Could not fetch column info - log and continue with prior truncation
         console.debug('Could not read alerts.alert_type column metadata, using configured limits');
       }
     } catch (colErr) {
@@ -156,17 +164,23 @@ const handleAlert = async (req, res) => {
     }
 
     const insertedId = (result.data && (result.data.insertId || result.data.insert_id)) ? (result.data.insertId || result.data.insert_id) : null;
+    // Log insertion success so we can distinguish server-side completion from client disconnects/timeouts
+    try {
+      console.log(`Alert recorded: id=${insertedId} farm=${farm_id} alert_type=${alert_type} lat=${location_latitude} lon=${location_longitude}`);
+    } catch (logErr) {
+      console.debug('Failed to log alert recorded:', logErr && logErr.message ? logErr.message : logErr);
+    }
 
     // Send email notification if SMTP configured
+    // Do NOT await email sending to avoid blocking the HTTP response in case SMTP is slow/unreachable.
     if (process.env.SMTP_USER && process.env.SMTP_PASS && process.env.ALERT_EMAIL_TO) {
       const to = process.env.ALERT_EMAIL_TO;
       const subject = `Cattle Farm Alert: ${title}`;
       const text = `Alert: ${title}\nSeverity: ${severity}\nMessage: ${message}\nLocation: ${location_latitude}, ${location_longitude}`;
-      try {
-        await sendEmail({ to, subject, text });
-      } catch (mailErr) {
+      // fire-and-forget; attach catch to avoid unhandled rejections
+      sendEmail({ to, subject, text }).catch(mailErr => {
         console.warn('Failed to send alert email:', mailErr && mailErr.message ? mailErr.message : mailErr);
-      }
+      });
     }
 
     return res.status(201).json({ success: true, message: 'Alert recorded', id: insertedId });
