@@ -30,37 +30,43 @@ const login = async (req, res) => {
     const hash = dbUser.password_hash || '';
     let match = false;
     try {
-      const isBcrypt = typeof hash === 'string' && /\$2[aby]\$/.test(hash);
-      if (isBcrypt) {
-        // Normal bcrypt verification
-        match = await bcrypt.compare(password, hash);
+      // If DISABLE_BCRYPT is set, compare plain-text passwords (insecure, use only for temporary compatibility)
+      if (process.env.DISABLE_BCRYPT === 'true') {
+        console.warn('⚠️ DISABLE_BCRYPT is enabled - performing plain-text password comparison. This is insecure; use only temporarily.');
+        match = String(password) === String(hash);
       } else {
-        // Legacy / non-bcrypt handling (opt-in via env var)
-        if (process.env.ALLOW_LEGACY_PASSWORDS === 'true') {
-          console.warn(`⚠️ Legacy password comparison enabled for email: ${String(email).trim()}`);
-          // direct string compare - assumes stored hash may be plain text
-          match = String(password) === String(hash);
-
-          // If legacy match succeeds, automatically re-hash the password using bcrypt
-          // and update the user's password_hash so future logins use bcrypt.
-          if (match) {
-            try {
-              const newHash = bcrypt.hashSync(String(password), 12);
-              // update users table
-              await require('./database').executeQuery('UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?', [newHash, dbUser.id]);
-              console.log(`✅ Migrated legacy password to bcrypt for user id=${dbUser.id}`);
-            } catch (upErr) {
-              console.error('Failed to migrate legacy password to bcrypt for user', dbUser.id, upErr);
-            }
-          }
+        const isBcrypt = typeof hash === 'string' && /\$2[aby]\$/.test(hash);
+        if (isBcrypt) {
+          // Normal bcrypt verification
+          match = await bcrypt.compare(password, hash);
         } else {
-          // Try bcrypt anyway in case of truncated/alternate formats, but do not enable legacy behavior
-          try {
-            match = await bcrypt.compare(password, hash);
-          } catch (innerErr) {
-            // ignore - will treat as no match
-            console.error('bcrypt compare error (fallback):', innerErr);
-            match = false;
+          // Legacy / non-bcrypt handling (opt-in via env var)
+          if (process.env.ALLOW_LEGACY_PASSWORDS === 'true') {
+            console.warn(`⚠️ Legacy password comparison enabled for email: ${String(email).trim()}`);
+            // direct string compare - assumes stored hash may be plain text
+            match = String(password) === String(hash);
+
+            // If legacy match succeeds, automatically re-hash the password using bcrypt
+            // and update the user's password_hash so future logins use bcrypt.
+            if (match) {
+              try {
+                const newHash = bcrypt.hashSync(String(password), 12);
+                // update users table
+                await require('./database').executeQuery('UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?', [newHash, dbUser.id]);
+                console.log(`✅ Migrated legacy password to bcrypt for user id=${dbUser.id}`);
+              } catch (upErr) {
+                console.error('Failed to migrate legacy password to bcrypt for user', dbUser.id, upErr);
+              }
+            }
+          } else {
+            // Try bcrypt anyway in case of truncated/alternate formats, but do not enable legacy behavior
+            try {
+              match = await bcrypt.compare(password, hash);
+            } catch (innerErr) {
+              // ignore - will treat as no match
+              console.error('bcrypt compare error (fallback):', innerErr);
+              match = false;
+            }
           }
         }
       }
