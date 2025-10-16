@@ -83,6 +83,8 @@ const router = express.Router();
 router.post('/auth/login', login);
 // Return current user (session or token)
 router.get('/auth/me', optionalAuth, getCurrentUser);
+// Logout (clear server-side session)
+router.post('/auth/logout', optionalAuth, require('./controllers').logout);
 
 // Protected routes
 router.get('/dashboard/summary', optionalAuth, getDashboardSummary);

@@ -18,6 +18,7 @@ const login = async (req, res) => {
       return res.status(500).json({ success: false, message: 'Failed to query users' });
     }
     if (!userRes.data || userRes.data.length === 0) {
+      console.warn(`Login attempt failed - user not found for email: ${String(email).trim()}`);
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
@@ -35,6 +36,7 @@ const login = async (req, res) => {
     }
 
     if (!match) {
+      console.warn(`Login attempt failed - invalid password for email: ${String(email).trim()}`);
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
@@ -841,6 +843,27 @@ const getCurrentUser = async (req, res) => {
   }
 };
 
+// Logout - destroy server session and clear cookie
+const logout = (req, res) => {
+  try {
+    if (req.session) {
+      req.session.destroy(err => {
+        if (err) {
+          console.error('Session destroy error:', err);
+          return res.status(500).json({ success: false, message: 'Failed to log out' });
+        }
+        res.clearCookie(process.env.SESSION_NAME || 'cattlefarm.sid');
+        return res.json({ success: true, message: 'Logged out' });
+      });
+    } else {
+      return res.json({ success: true, message: 'No active session' });
+    }
+  } catch (err) {
+    console.error('Logout error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 // Export controllers (placed after function declarations to ensure all values are defined)
 module.exports = {
   login,
@@ -860,5 +883,6 @@ module.exports = {
   resolveAlert,
   updateAnimalLocation,
   deleteAllAlerts,
-  getCurrentUser
+  getCurrentUser,
+  logout
 };
