@@ -1,5 +1,10 @@
 const jwt = require('jsonwebtoken');
 
+// TEMPORARY: disable auth for all requests when true.
+// This is intended for quick local testing only. Remove or set to false
+// before deploying or sharing this environment.
+const TEMP_DISABLE_AUTH = true; // <-- set to false to re-enable auth checks
+
 // Verify JWT token middleware
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -7,6 +12,13 @@ const authenticateToken = (req, res, next) => {
   const devBypass = process.env.DEV_AUTH_BYPASS === 'true';
 
   if (!token) {
+    // Global temporary bypass (overrides token requirement)
+    if (TEMP_DISABLE_AUTH) {
+      console.warn('⚠️ TEMP_DISABLE_AUTH enabled: skipping token checks and injecting temporary viewer user');
+      req.user = { id: 1, email: 'dev@localhost', role: 'viewer', name: 'Dev User (temp)' };
+      return next();
+    }
+
     if (devBypass && process.env.NODE_ENV !== 'production') {
       // For development only: allow requests without token but inject a minimal user.
       // Use a limited role ('viewer') to avoid accidental admin-level access during dev.
