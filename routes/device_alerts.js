@@ -50,7 +50,7 @@ const handleAlert = async (req, res) => {
   const MAX_SEVERITY = 32;
   const MAX_TITLE = 255;
 
-  const alert_type = raw_alert_type.length > MAX_ALERT_TYPE ? raw_alert_type.substring(0, MAX_ALERT_TYPE) : raw_alert_type;
+  let alert_type = raw_alert_type.length > MAX_ALERT_TYPE ? raw_alert_type.substring(0, MAX_ALERT_TYPE) : raw_alert_type;
   const severity = raw_severity.length > MAX_SEVERITY ? raw_severity.substring(0, MAX_SEVERITY) : raw_severity;
   const title = raw_title.length > MAX_TITLE ? raw_title.substring(0, MAX_TITLE) : raw_title;
   const message = raw_message; // message is TEXT in DB, keep as-is
@@ -65,6 +65,45 @@ const handleAlert = async (req, res) => {
     const triggered_at = payload.triggered_at ? payload.triggered_at : null; // allow DB default when null
     const status = payload.status ? String(payload.status) : 'active';
     const auto_generated = (typeof payload.auto_generated !== 'undefined') ? Number(payload.auto_generated) : 1;
+
+    // Before inserting, verify actual DB column limits (character length and octet length)
+    try {
+      const dbName = process.env.DB_NAME || 'cattle_farm_monitoring';
+      const colRes = await executeQuery(
+        `SELECT CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH, CHARACTER_SET_NAME
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'alerts' AND COLUMN_NAME = 'alert_type' LIMIT 1`,
+        [dbName]
+      );
+      if (colRes.success && Array.isArray(colRes.data) && colRes.data.length > 0) {
+        const info = colRes.data[0];
+        const charLimit = info.CHARACTER_MAXIMUM_LENGTH || MAX_ALERT_TYPE;
+        const octetLimit = info.CHARACTER_OCTET_LENGTH || (MAX_ALERT_TYPE * 4);
+        const alertChars = alert_type.length;
+        const alertBytes = Buffer.byteLength(alert_type, 'utf8');
+        console.debug('alert_type char/bytes:', alertChars, '/', alertBytes, 'db charLimit/octetLimit:', charLimit, '/', octetLimit, 'charset:', info.CHARACTER_SET_NAME);
+        // If the byte length exceeds octetLimit, truncate by bytes safely
+        if (alertBytes > octetLimit) {
+          // Truncate by characters until byte length fits
+          let truncated = alert_type;
+          while (Buffer.byteLength(truncated, 'utf8') > octetLimit && truncated.length > 0) {
+            truncated = truncated.substring(0, Math.max(0, truncated.length - 1));
+          }
+          console.warn('Byte-aware truncated alert_type from', alertBytes, 'bytes to', Buffer.byteLength(truncated, 'utf8'), 'bytes');
+          alert_type = truncated;
+        }
+        // Also ensure we don't exceed character limit
+        if (alert_type.length > charLimit) {
+          console.warn('Char-limit truncated alert_type from', alert_type.length, 'to', charLimit);
+          alert_type = alert_type.substring(0, charLimit);
+        }
+      } else {
+        // Could not fetch column info - log and continue with prior truncation
+        console.debug('Could not read alerts.alert_type column metadata, using configured limits');
+      }
+    } catch (colErr) {
+      console.warn('Failed to check alert_type column metadata:', colErr && colErr.message ? colErr.message : colErr);
+    }
 
     // Insert into alerts table with explicit columns matching schema
     const sql = `
@@ -94,7 +133,19 @@ const handleAlert = async (req, res) => {
 
     const result = await executeQuery(sql, params);
     if (!result.success) {
-      console.error('Failed to insert alert:', result.error);
+      // Extra diagnostic logging to help trace truncation cause
+      try {
+        const paramInfo = params.map(p => ({ type: typeof p, length: (p && typeof p === 'string') ? p.length : null }));
+        console.error('Failed to insert alert:', result.error);
+        console.error('Insert params info:', paramInfo);
+        console.error('Sample alert_type (chars/bytes):', alert_type ? alert_type.length : 0, '/', alert_type ? Buffer.byteLength(alert_type, 'utf8') : 0);
+        console.error('Sample title (chars/bytes):', title ? title.length : 0, '/', title ? Buffer.byteLength(title, 'utf8') : 0);
+        console.error('Sample message (chars/bytes):', message ? message.length : 0, '/', message ? Buffer.byteLength(message, 'utf8') : 0);
+        // Keep an abbreviated payload in logs (avoid huge dumps)
+        console.error('Payload sample:', JSON.stringify({ alert_type: alert_type ? alert_type.substring(0, 200) : null, title: title ? title.substring(0, 200) : null, message: message ? message.substring(0, 400) : null }));
+      } catch (diagErr) {
+        console.error('Diagnostic logging failed:', diagErr && diagErr.message ? diagErr.message : diagErr);
+      }
       return res.status(500).json({ success: false, message: 'Failed to insert alert', error: result.error });
     }
 
