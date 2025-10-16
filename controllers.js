@@ -39,6 +39,13 @@ const login = async (req, res) => {
     const user = result.data[0];
     // Compare provided password with stored hash
     const passwordMatches = await bcrypt.compare(password, user.password_hash);
+    if (process.env.DEBUG_AUTH === '1') {
+      try {
+        console.debug('DEBUG_AUTH: password compare result=', !!passwordMatches);
+      } catch (d) {
+        /* ignore logging errors */
+      }
+    }
     if (!user || !passwordMatches) {
       return res.status(401).json({
         success: false,

@@ -117,6 +117,22 @@ router.get('/_routes', (req, res) => {
   }
 });
 
+// Dev-only helper to check if a user exists (enable by setting DEBUG_DEV_ENDPOINTS=1)
+router.get('/_debug/user-exists', async (req, res) => {
+  try {
+    if (process.env.DEBUG_DEV_ENDPOINTS !== '1') return res.status(404).json({ success: false, message: 'Not found' });
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ success: false, message: 'email query param required' });
+    const r = await executeQuery('SELECT id, email, is_active FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1', [email]);
+    if (!r.success) return res.status(500).json({ success: false, message: 'DB error' });
+    if (r.data.length === 0) return res.json({ success: true, exists: false });
+    return res.json({ success: true, exists: true, active: !!r.data[0].is_active });
+  } catch (err) {
+    console.error('Debug user-exists error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 // Use router
 app.use('/api/v1', router);
 
