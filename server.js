@@ -124,16 +124,10 @@ app.use('/api/v1', router);
 app.use('/device', deviceAlertsRoute);
 console.log('🔔 Device alerts route also mounted at /device (fallback)');
 
-// Fallback direct mount: call handler directly for POST/GET on these paths
-if (deviceAlertsRoute && deviceAlertsRoute.handleAlert) {
-  app.post('/api/v1/device/alert', deviceAlertsRoute.handleAlert);
-  app.post('/device/alert', deviceAlertsRoute.handleAlert);
-  app.get('/api/v1/device/alert', deviceAlertsRoute.handleAlert);
-  app.get('/device/alert', deviceAlertsRoute.handleAlert);
-  console.log('🔁 Device alert handler mounted directly at /api/v1/device/alert and /device/alert');
-} else {
-  console.warn('⚠️ Device alert handler not available to mount directly');
-}
+// Note: we mount the device alerts router under both /api/v1/device and /device
+// and provide an app-level fallback handler below that will forward to the
+// router's handler when necessary. Avoid mounting the same handler twice to
+// prevent duplicate registrations and confusing log output.
 
 // Additional robust fallbacks: direct echo and ping endpoints on app level
 // These ensure the deployed instance responds to device requests even if the router
