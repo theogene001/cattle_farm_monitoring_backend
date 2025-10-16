@@ -830,6 +830,17 @@ const deleteAllAlerts = async (req, res) => {
   }
 };
 
+// Return currently authenticated user from session or token (optional)
+const getCurrentUser = async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Not authenticated' });
+    return res.json({ success: true, data: { user: req.user } });
+  } catch (err) {
+    console.error('Get current user error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 // Export controllers (placed after function declarations to ensure all values are defined)
 module.exports = {
   login,
@@ -850,15 +861,4 @@ module.exports = {
   updateAnimalLocation,
   deleteAllAlerts,
   getCurrentUser
-};
-
-// Return currently authenticated user from session or token (optional)
-const getCurrentUser = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Not authenticated' });
-    return res.json({ success: true, data: { user: req.user } });
-  } catch (err) {
-    console.error('Get current user error:', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
 };
