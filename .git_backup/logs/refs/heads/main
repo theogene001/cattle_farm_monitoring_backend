@@ -1,0 +1,8 @@
+0000000000000000000000000000000000000000 027971b351b4791279ecfc4d92220f1c32b0fc1d theogene001 <theogene544@gmail.com> 1760198730 +0200	branch: Created from HEAD
+027971b351b4791279ecfc4d92220f1c32b0fc1d 90b6d2b4cd21a941768d0c03859008f05ccdf702 theogene001 <theogene544@gmail.com> 1760198730 +0200	commit: Backup controllers.js before edits (2025-10-11-18-05-30)
+90b6d2b4cd21a941768d0c03859008f05ccdf702 932c8513d017988b91821a204ca4cc77efa947ee theogene001 <theogene544@gmail.com> 1760268755 +0200	commit: first commit
+932c8513d017988b91821a204ca4cc77efa947ee 932c8513d017988b91821a204ca4cc77efa947ee theogene001 <theogene544@gmail.com> 1760268755 +0200	Branch: renamed refs/heads/backup/controllers-2025-10-11-18-05-30 to refs/heads/main
+932c8513d017988b91821a204ca4cc77efa947ee adcd93dac73c8361758a5566daa1d1283b9902eb theogene001 <theogene544@gmail.com> 1760268878 +0200	commit: Add backend files
+adcd93dac73c8361758a5566daa1d1283b9902eb 7c8891735ff5790194427244fe86c5520044f837 theogene001 <theogene544@gmail.com> 1760268930 +0200	commit: Add .gitignore and remove node_modules from repo
+7c8891735ff5790194427244fe86c5520044f837 99c5b261b9416843acacf94eeacd112be1559353 theogene001 <theogene544@gmail.com> 1760287197 +0200	commit: Add animal_locations support, GPS route improvements and live-map frontend component integration
+99c5b261b9416843acacf94eeacd112be1559353 4653aeb64d5afe8c7ec3faecc3ea64bd6e38374f theogene001 <theogene544@gmail.com> 1760288472 +0200	commit: Hotfix: avoid ReferenceError for updateAnimalLocation during deploy by requiring controller property directly

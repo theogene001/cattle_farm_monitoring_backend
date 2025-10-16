@@ -1,0 +1,4 @@
+0000000000000000000000000000000000000000 0b21a93f19eea2b5f92f5259b952389fa3f3e7ac theogene001 <theogene544@gmail.com> 1760197614 +0200	branch: Created from HEAD
+0b21a93f19eea2b5f92f5259b952389fa3f3e7ac 0e81f3f75c360e59636ab1161f9951891f01b31a theogene001 <theogene544@gmail.com> 1760197615 +0200	revert: Revert "initial commit - backend"
+0e81f3f75c360e59636ab1161f9951891f01b31a 54436bbc0ae5184b15b027c2bec44850b8e9c691 theogene001 <theogene544@gmail.com> 1760197616 +0200	revert: Revert "Remove backend .env from tracking and add .gitignore"
+54436bbc0ae5184b15b027c2bec44850b8e9c691 027971b351b4791279ecfc4d92220f1c32b0fc1d theogene001 <theogene544@gmail.com> 1760197616 +0200	revert: Revert "Add .env.example, DB test script and deployment checklist"
