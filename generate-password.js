@@ -5,7 +5,7 @@ console.log('=== Password Hashes for Testing ===');
 console.log('');
 
 // Common test passwords
-const passwords = ['admin123', 'password123', 'test123', 'demo123'];
+const passwords = ['admin123', 'password123', 'test123'];
 
 passwords.forEach(password => {
     const hash = bcrypt.hashSync(password, 12);
