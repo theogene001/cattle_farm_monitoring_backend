@@ -48,13 +48,12 @@ const app = express();
 
 // Middleware
 app.use(helmet());
+// Allow configuring allowed frontend origin via env var FRONTEND_ORIGIN.
+// If ENABLE_CORS_ANY is set to 'true', allow any origin (use only for development).
+const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:3000';
+const enableAny = process.env.ENABLE_CORS_ANY === 'true';
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:3001', 
-    'http://localhost:3002',
-    'http://localhost:3003'
-  ],
+  origin: enableAny ? true : frontendOrigin,
   credentials: true
 }));
 app.use(morgan('dev'));
