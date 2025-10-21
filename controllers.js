@@ -919,6 +919,105 @@ const logout = (req, res) => {
 };
 
 // Export controllers (placed after function declarations to ensure all values are defined)
+// Remote config update handler
+// - If `device_id` is provided: enqueue device-specific commands into `device_commands` (control / wifi_update)
+// - Otherwise: attempt to update system defaults in `system_settings` (if those columns exist)
+const updateRemoteConfig = async (req, res) => {
+  try {
+    const {
+      sensorThreshold,
+      soundEnabled,
+      lightsEnabled,
+      wifiSSID,
+      wifiPassword,
+      device_id,
+      expires_hours
+    } = req.body || {};
+
+    // If a device_id is provided, enqueue commands for that device
+    if (device_id) {
+      const now = new Date();
+      const controlPayload = {};
+      let inserted = [];
+
+      if (typeof soundEnabled !== 'undefined' || typeof lightsEnabled !== 'undefined') {
+        if (typeof soundEnabled !== 'undefined') controlPayload.sound = !!soundEnabled;
+        if (typeof lightsEnabled !== 'undefined') controlPayload.lights = !!lightsEnabled;
+        const expiresAt = new Date(now.getTime() + ((expires_hours || 1) * 60 * 60 * 1000));
+        const insertRes = await executeQuery(
+          'INSERT INTO device_commands (device_id, command_type, payload, expires_at) VALUES (?, ?, ?, ?)',
+          [device_id, 'control', JSON.stringify(controlPayload), expiresAt]
+        );
+        if (!insertRes.success) {
+          console.error('Failed to enqueue control command:', insertRes.error);
+          return res.status(500).json({ success: false, message: 'Failed to enqueue control command' });
+        }
+        inserted.push({ type: 'control', id: insertRes.data && insertRes.data.insertId ? insertRes.data.insertId : null });
+      }
+
+      if (wifiSSID || wifiPassword) {
+        // IMPORTANT: we store wifi payload only transiently in device_commands. Prefer encrypting password in transit.
+        const wifiPayload = { ssid: wifiSSID || null, password: wifiPassword || null };
+        const expiresAt = new Date(now.getTime() + ((expires_hours || 24) * 60 * 60 * 1000));
+        const insertRes = await executeQuery(
+          'INSERT INTO device_commands (device_id, command_type, payload, expires_at) VALUES (?, ?, ?, ?)',
+          [device_id, 'wifi_update', JSON.stringify(wifiPayload), expiresAt]
+        );
+        if (!insertRes.success) {
+          console.error('Failed to enqueue wifi_update command:', insertRes.error);
+          return res.status(500).json({ success: false, message: 'Failed to enqueue wifi_update command' });
+        }
+        inserted.push({ type: 'wifi_update', id: insertRes.data && insertRes.data.insertId ? insertRes.data.insertId : null });
+      }
+
+      return res.json({ success: true, message: 'Commands enqueued', data: inserted });
+    }
+
+    // Otherwise attempt to update system defaults in system_settings (if the table/columns exist)
+    const updates = [];
+    const params = [];
+    if (typeof soundEnabled !== 'undefined') {
+      updates.push('default_sound_enabled = ?');
+      params.push(soundEnabled ? 1 : 0);
+    }
+    if (typeof lightsEnabled !== 'undefined') {
+      updates.push('default_lights_enabled = ?');
+      params.push(lightsEnabled ? 1 : 0);
+    }
+    if (typeof sensorThreshold !== 'undefined') {
+      updates.push('sensor_threshold = ?');
+      params.push(sensorThreshold);
+    }
+
+    if (updates.length > 0) {
+      try {
+        // Try an UPDATE first; system_settings may be a single-row table
+        const sql = `UPDATE system_settings SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP`;
+        const upd = await executeQuery(sql, params);
+        if (!upd.success) {
+          console.warn('system_settings update failed (maybe table/columns missing):', upd.error);
+          // Fall through and return success but indicate partial
+          return res.json({ success: true, message: 'Accepted but system settings update may not be persisted (check schema)', data: { sensorThreshold, soundEnabled, lightsEnabled } });
+        }
+      } catch (updErr) {
+        console.warn('Failed updating system_settings:', updErr && updErr.message ? updErr.message : updErr);
+        return res.json({ success: true, message: 'Accepted but system settings update may not be persisted (check schema)', data: { sensorThreshold, soundEnabled, lightsEnabled } });
+      }
+    }
+
+    // If wifi fields were provided globally, we do NOT store plaintext wifi password in system table. Return accepted.
+    if (wifiSSID || wifiPassword) {
+      console.warn('Global wifi update requested without device_id. Not storing wifi password globally for security. Provide device_id to perform wifi update per-device.');
+      return res.status(400).json({ success: false, message: 'Provide device_id to perform wifi update on a specific device' });
+    }
+
+    return res.json({ success: true, message: 'Remote config updated', data: { sensorThreshold, soundEnabled, lightsEnabled } });
+  } catch (err) {
+    console.error('Remote config update error:', err && err.message ? err.message : err);
+    res.status(500).json({ success: false, message: 'Failed to update remote config' });
+  }
+};
+
 module.exports = {
   login,
   getDashboardSummary,
@@ -938,5 +1037,6 @@ module.exports = {
   updateAnimalLocation,
   deleteAllAlerts,
   getCurrentUser,
-  logout
+  logout,
+  updateRemoteConfig
 };

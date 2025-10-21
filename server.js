@@ -42,6 +42,7 @@ const gpsRoute = require('./routes/gps');
 const gpsStreamRoute = require('./routes/gps_stream');
 const usersRoute = require('./routes/users');
 const deviceAlertsRoute = require('./routes/device_alerts');
+const settingsRoute = require('./routes/settings');
 
 // Create Express app
 const app = express();
@@ -113,6 +114,8 @@ router.use('/gps', gpsStreamRoute);
 router.use('/users', usersRoute);
 // Device alerts route (public)
 router.use('/device', deviceAlertsRoute);
+// Settings route for remote config
+router.use('/settings', settingsRoute);
 console.log('🔔 Device alerts route mounted at /api/v1/device');
 
 // Health check
@@ -371,6 +374,38 @@ const startServer = async () => {
           INDEX idx_farm (farm_id),
           INDEX idx_tag (tag_number)
         )
+      `);
+      // Ensure collars table exists and has device_api_key column
+      await executeQuery(`
+        CREATE TABLE IF NOT EXISTS collars (
+          id BIGINT AUTO_INCREMENT PRIMARY KEY,
+          serial_number VARCHAR(150) DEFAULT NULL,
+          model VARCHAR(64) DEFAULT NULL,
+          status VARCHAR(32) DEFAULT 'active',
+          is_functional BOOLEAN DEFAULT TRUE,
+          device_api_key VARCHAR(255) DEFAULT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+
+      // Ensure device_commands table exists (no foreign keys by design)
+      await executeQuery(`
+        CREATE TABLE IF NOT EXISTS device_commands (
+          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+          device_id BIGINT UNSIGNED NOT NULL,
+          command_type VARCHAR(50) NOT NULL,
+          payload JSON DEFAULT NULL,
+          status ENUM('pending','sent','acknowledged','failed','expired') NOT NULL DEFAULT 'pending',
+          retry_count INT UNSIGNED NOT NULL DEFAULT 0,
+          expires_at DATETIME DEFAULT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          sent_at DATETIME DEFAULT NULL,
+          acked_at DATETIME DEFAULT NULL,
+          INDEX (device_id),
+          INDEX (status),
+          INDEX (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
       console.log('✅ Verified core tables (users, farms)');
     } catch (migErr) {
