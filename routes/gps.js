@@ -21,6 +21,89 @@ router.post('/', async (req, res) => {
       temperature_celsius = null
     } = req.body;
 
+    // Allow updating an existing historical GPS row when client provides update_id (or id)
+    const updateId = req.body.update_id || req.body.id || null;
+
+    if (updateId) {
+      // Build update statement for animal_locations
+      const updateSql = `UPDATE animal_locations SET
+        animal_id = ?,
+        collar_id = ?,
+        latitude = ?,
+        longitude = ?,
+        altitude_meters = ?,
+        accuracy_meters = ?,
+        speed_kmh = ?,
+        heading_degrees = ?,
+        recorded_at = ?,
+        battery_level = ?,
+        signal_quality = ?,
+        temperature_celsius = ?
+      WHERE id = ?`;
+
+      const updateParams = [
+        animal_id,
+        collar_id,
+        Number(latitude),
+        Number(longitude),
+        altitude_meters,
+        accuracy_meters,
+        speed_kmh,
+        heading_degrees,
+        recorded_at ? recorded_at : new Date(),
+        battery_level,
+        signal_quality,
+        temperature_celsius,
+        updateId
+      ];
+
+      const updateRes = await executeQuery(updateSql, updateParams);
+      if (!updateRes.success) {
+        return res.status(500).json({ success: false, message: 'Failed to update animal_locations', error: updateRes.error });
+      }
+      // Also upsert into current_locations for real-time dashboard updates
+      try {
+        const upsertSql = `INSERT INTO current_locations (animal_id, collar_id, latitude, longitude, recorded_at, battery_level, signal_quality, temperature_celsius)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            latitude = VALUES(latitude),
+            longitude = VALUES(longitude),
+            recorded_at = VALUES(recorded_at),
+            battery_level = VALUES(battery_level),
+            signal_quality = VALUES(signal_quality),
+            temperature_celsius = VALUES(temperature_celsius)`;
+        const upsertParams = [
+          animal_id,
+          collar_id,
+          Number(latitude),
+          Number(longitude),
+          recorded_at ? recorded_at : new Date(),
+          battery_level,
+          signal_quality,
+          temperature_celsius
+        ];
+        await executeQuery(upsertSql, upsertParams);
+        // Emit live event for subscribers so maps refresh
+        try {
+          gpsEmitter.emit('location', {
+            animal_id,
+            collar_id,
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+            recorded_at: upsertParams[4],
+            battery_level,
+            signal_quality,
+            temperature_celsius
+          });
+        } catch (emitErr) {
+          console.warn('Failed to emit gps location event after update:', emitErr && emitErr.message ? emitErr.message : emitErr);
+        }
+      } catch (upErr) {
+        console.warn('Failed to upsert current_locations after gps update:', upErr.message || upErr);
+      }
+      return res.json({ success: true, message: 'GPS record updated', id: updateId });
+    }
+
     if (latitude == null || longitude == null) {
       return res.status(400).json({ success: false, message: 'Missing coordinates' });
     }

@@ -2,118 +2,102 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { executeQuery } = require('./database');
 
-// User login - real DB-backed authentication
-// Accepts { email, password } and authenticates against users table.
-// On success: creates a session (req.session.user) and returns a JWT + user data (without password)
+// User login
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body || {};
+    const { email, password } = req.body;
+
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password are required' });
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
     }
 
-    const q = 'SELECT id, name, email, password_hash, role, is_active FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1';
-    const userRes = await executeQuery(q, [String(email).trim()]);
-    if (!userRes.success) {
-      return res.status(500).json({ success: false, message: 'Failed to query users' });
-    }
-    // If LOGIN_BYPASS is enabled, skip password verification and issue a token for the user.
-    const loginBypass = process.env.LOGIN_BYPASS === 'true';
-    if (!userRes.data || userRes.data.length === 0) {
-      if (!loginBypass) {
-        console.warn(`Login attempt failed - user not found for email: ${String(email).trim()}`);
-        return res.status(401).json({ success: false, message: 'Invalid email or password' });
+    // Real database
+    const result = await executeQuery(
+      'SELECT id, name, email, password_hash, role FROM users WHERE LOWER(email) = LOWER(?) AND is_active = TRUE',
+      [email]
+    );
+
+    // Optional debug logging to help diagnose 401s (enable by setting DEBUG_AUTH=1)
+    if (process.env.DEBUG_AUTH === '1') {
+      try {
+        console.debug('DEBUG_AUTH: user lookup result success=', result.success, 'rows=', result.data ? result.data.length : 0);
+      } catch (d) {
+        console.debug('DEBUG_AUTH: unable to log user lookup result');
       }
-      // When bypassing and user doesn't exist, create a temporary dev user payload
-      const tempUser = {
-        id: 1,
-        name: String(email).trim(),
-        email: String(email).trim(),
-        password_hash: '',
-        role: 'admin',
-        is_active: true
-      };
-      var dbUser = tempUser;
-      console.warn(`⚠️ LOGIN_BYPASS active: issuing token for non-existing user ${email}`);
-    } else {
-      var dbUser = userRes.data[0];
-    }
-    if (!dbUser.is_active) {
-      return res.status(403).json({ success: false, message: 'Account is disabled' });
     }
 
-    const hash = dbUser.password_hash || '';
-    let match = false;
+    if (!result.success || result.data.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    const user = result.data[0];
+    // Compare provided password with stored hash
+    let passwordMatches = false;
     try {
-      // If DISABLE_BCRYPT is set, compare plain-text passwords (insecure, use only for temporary compatibility)
-      if (process.env.DISABLE_BCRYPT === 'true') {
-        console.warn('⚠️ DISABLE_BCRYPT is enabled - performing plain-text password comparison. This is insecure; use only temporarily.');
-        match = String(password) === String(hash);
+      passwordMatches = await bcrypt.compare(password, user.password_hash);
+    } catch (e) {
+      // If bcrypt.compare throws (e.g., stored value isn't a bcrypt hash),
+      // optionally allow a plaintext comparison for development only
+      if (process.env.ALLOW_PLAINTEXT_LOGIN === '1') {
+        passwordMatches = (password === user.password_hash);
+        if (process.env.DEBUG_AUTH === '1') console.debug('DEBUG_AUTH: plaintext fallback used for user', user.email);
       } else {
-        const isBcrypt = typeof hash === 'string' && /\$2[aby]\$/.test(hash);
-        if (isBcrypt) {
-          // Normal bcrypt verification
-          match = await bcrypt.compare(password, hash);
-        } else {
-          // Legacy / non-bcrypt handling (opt-in via env var)
-          if (process.env.ALLOW_LEGACY_PASSWORDS === 'true') {
-            console.warn(`⚠️ Legacy password comparison enabled for email: ${String(email).trim()}`);
-            // direct string compare - assumes stored hash may be plain text
-            match = String(password) === String(hash);
-
-            // If legacy match succeeds, automatically re-hash the password using bcrypt
-            // and update the user's password_hash so future logins use bcrypt.
-            if (match) {
-              try {
-                const newHash = bcrypt.hashSync(String(password), 12);
-                // update users table
-                await require('./database').executeQuery('UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?', [newHash, dbUser.id]);
-                console.log(`✅ Migrated legacy password to bcrypt for user id=${dbUser.id}`);
-              } catch (upErr) {
-                console.error('Failed to migrate legacy password to bcrypt for user', dbUser.id, upErr);
-              }
-            }
-          } else {
-            // Try bcrypt anyway in case of truncated/alternate formats, but do not enable legacy behavior
-            try {
-              match = await bcrypt.compare(password, hash);
-            } catch (innerErr) {
-              // ignore - will treat as no match
-              console.error('bcrypt compare error (fallback):', innerErr);
-              match = false;
-            }
-          }
-        }
+        // keep it false and allow the handler to return 401 below
+        if (process.env.DEBUG_AUTH === '1') console.debug('DEBUG_AUTH: bcrypt compare failed and plaintext fallback disabled');
       }
-    } catch (err) {
-      console.error('bcrypt compare error:', err);
+    }
+    if (process.env.DEBUG_AUTH === '1') {
+      try {
+        console.debug('DEBUG_AUTH: password compare result=', !!passwordMatches);
+      } catch (d) {
+        /* ignore logging errors */
+      }
+    }
+    if (!user || !passwordMatches) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
     }
 
-    if (!match) {
-      console.warn(`Login attempt failed - invalid password for email: ${String(email).trim()}`);
-      return res.status(401).json({ success: false, message: 'Invalid email or password' });
-    }
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role,
+        name: user.name
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN }
+    );
 
-    const userPayload = {
-      id: dbUser.id,
-      email: dbUser.email,
-      name: dbUser.name || dbUser.email,
-      role: dbUser.role || 'viewer'
-    };
-
-    // create session
-    if (req.session) {
-      req.session.user = userPayload;
-    }
-
-    const token = jwt.sign(userPayload, process.env.JWT_SECRET || 'dev-jwt-secret-change-me', {
-      expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        },
+        token
+      }
     });
 
-    return res.json({ success: true, message: 'Login successful', data: { user: userPayload, token } });
   } catch (error) {
     console.error('Login error:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 };
 
@@ -860,202 +844,6 @@ const markAlertRead = async (req, res) => {
   }
 };
 
-// Delete all alerts (truncate) - protected action
-const deleteAllAlerts = async (req, res) => {
-  try {
-    // Allow only admin users, unless DEV_ALLOW_TRUNCATE env var is set to 'true'
-    const isAdmin = req.user && req.user.role === 'admin';
-    if (!isAdmin && process.env.DEV_ALLOW_TRUNCATE !== 'true') {
-      return res.status(403).json({ success: false, message: 'Forbidden' });
-    }
-
-    // Use TRUNCATE for fast removal; fall back to DELETE if unsupported by DB
-    let result = await executeQuery('TRUNCATE TABLE alerts');
-    if (!result.success) {
-      // Try DELETE as fallback
-      result = await executeQuery('DELETE FROM alerts');
-      if (!result.success) {
-        return res.status(500).json({ success: false, message: 'Failed to clear alerts', error: result.error });
-      }
-    }
-
-    return res.json({ success: true, message: 'All alerts cleared' });
-  } catch (error) {
-    console.error('Clear alerts error:', error);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-};
-
-// Return currently authenticated user from session or token (optional)
-const getCurrentUser = async (req, res) => {
-  try {
-    if (!req.user) return res.status(401).json({ success: false, message: 'Not authenticated' });
-    return res.json({ success: true, data: { user: req.user } });
-  } catch (err) {
-    console.error('Get current user error:', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-};
-
-// Logout - destroy server session and clear cookie
-const logout = (req, res) => {
-  try {
-    if (req.session) {
-      req.session.destroy(err => {
-        if (err) {
-          console.error('Session destroy error:', err);
-          return res.status(500).json({ success: false, message: 'Failed to log out' });
-        }
-        res.clearCookie(process.env.SESSION_NAME || 'cattlefarm.sid');
-        return res.json({ success: true, message: 'Logged out' });
-      });
-    } else {
-      return res.json({ success: true, message: 'No active session' });
-    }
-  } catch (err) {
-    console.error('Logout error:', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-};
-
-// Export controllers (placed after function declarations to ensure all values are defined)
-// Remote config update handler
-// - If `device_id` is provided: enqueue device-specific commands into `device_commands` (control / wifi_update)
-// - Otherwise: attempt to update system defaults in `system_settings` (if those columns exist)
-const crypto = require('crypto');
-
-// Simple symmetric encryption using server secret (use KMS for prod)
-const encrypt = (plaintext) => {
-  const key = (process.env.SERVER_SECRET || 'dev-server-secret-please-change').padEnd(32, '0').slice(0,32);
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(key), iv);
-  let encrypted = cipher.update(String(plaintext || ''), 'utf8', 'base64');
-  encrypted += cipher.final('base64');
-  return iv.toString('base64') + ':' + encrypted;
-};
-
-const decrypt = (payload) => {
-  try {
-    const key = (process.env.SERVER_SECRET || 'dev-server-secret-please-change').padEnd(32, '0').slice(0,32);
-    const parts = String(payload).split(':');
-    if (parts.length !== 2) return null;
-    const iv = Buffer.from(parts[0], 'base64');
-    const enc = parts[1];
-    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(key), iv);
-    let decrypted = decipher.update(enc, 'base64', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
-  } catch (e) {
-    return null;
-  }
-};
-
-const updateRemoteConfig = async (req, res) => {
-  try {
-    const {
-      sensorThreshold,
-      soundEnabled,
-      lightsEnabled,
-      wifiSSID,
-      wifiPassword,
-      device_id,
-      expires_hours
-    } = req.body || {};
-
-    // If a device_id is provided, enqueue commands for that device
-    if (device_id) {
-      const now = new Date();
-      const controlPayload = {};
-      let inserted = [];
-
-      if (typeof soundEnabled !== 'undefined' || typeof lightsEnabled !== 'undefined') {
-        if (typeof soundEnabled !== 'undefined') controlPayload.sound = !!soundEnabled;
-        if (typeof lightsEnabled !== 'undefined') controlPayload.lights = !!lightsEnabled;
-        const expiresAt = new Date(now.getTime() + ((expires_hours || 1) * 60 * 60 * 1000));
-        const insertRes = await executeQuery(
-          'INSERT INTO device_commands (device_id, command_type, payload, expires_at) VALUES (?, ?, ?, ?)',
-          [device_id, 'control', JSON.stringify(controlPayload), expiresAt]
-        );
-        if (!insertRes.success) {
-          console.error('Failed to enqueue control command:', insertRes.error);
-          return res.status(500).json({ success: false, message: 'Failed to enqueue control command' });
-        }
-        inserted.push({ type: 'control', id: insertRes.data && insertRes.data.insertId ? insertRes.data.insertId : null });
-      }
-
-      if (wifiSSID || wifiPassword) {
-        // Persist encrypted Wi-Fi credentials in collars table (short-term storage)
-        try {
-          const encryptedPass = wifiPassword ? encrypt(wifiPassword) : null;
-          const up = await executeQuery('UPDATE collars SET wifi_ssid = ?, wifi_password_encrypted = ? WHERE id = ?', [wifiSSID || null, encryptedPass, device_id]);
-          if (!up.success) {
-            console.warn('Failed to persist wifi creds to collars:', up.error);
-          }
-        } catch (e) {
-          console.warn('Exception when persisting wifi creds:', e && e.message ? e.message : e);
-        }
-
-        const wifiPayload = { ssid: wifiSSID || null, password: wifiPassword ? '[REDACTED]' : null };
-        const expiresAt = new Date(now.getTime() + ((expires_hours || 24) * 60 * 60 * 1000));
-        const insertRes = await executeQuery(
-          'INSERT INTO device_commands (device_id, command_type, payload, expires_at) VALUES (?, ?, ?, ?)',
-          [device_id, 'wifi_update', JSON.stringify(wifiPayload), expiresAt]
-        );
-        if (!insertRes.success) {
-          console.error('Failed to enqueue wifi_update command:', insertRes.error);
-          return res.status(500).json({ success: false, message: 'Failed to enqueue wifi_update command' });
-        }
-        inserted.push({ type: 'wifi_update', id: insertRes.data && insertRes.data.insertId ? insertRes.data.insertId : null });
-      }
-
-      return res.json({ success: true, message: 'Commands enqueued', data: inserted });
-    }
-
-    // Otherwise attempt to update system defaults in system_settings (if the table/columns exist)
-    const updates = [];
-    const params = [];
-    if (typeof soundEnabled !== 'undefined') {
-      updates.push('default_sound_enabled = ?');
-      params.push(soundEnabled ? 1 : 0);
-    }
-    if (typeof lightsEnabled !== 'undefined') {
-      updates.push('default_lights_enabled = ?');
-      params.push(lightsEnabled ? 1 : 0);
-    }
-    if (typeof sensorThreshold !== 'undefined') {
-      updates.push('sensor_threshold = ?');
-      params.push(sensorThreshold);
-    }
-
-    if (updates.length > 0) {
-      try {
-        // Try an UPDATE first; system_settings may be a single-row table
-        const sql = `UPDATE system_settings SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP`;
-        const upd = await executeQuery(sql, params);
-        if (!upd.success) {
-          console.warn('system_settings update failed (maybe table/columns missing):', upd.error);
-          // Fall through and return success but indicate partial
-          return res.json({ success: true, message: 'Accepted but system settings update may not be persisted (check schema)', data: { sensorThreshold, soundEnabled, lightsEnabled } });
-        }
-      } catch (updErr) {
-        console.warn('Failed updating system_settings:', updErr && updErr.message ? updErr.message : updErr);
-        return res.json({ success: true, message: 'Accepted but system settings update may not be persisted (check schema)', data: { sensorThreshold, soundEnabled, lightsEnabled } });
-      }
-    }
-
-    // If wifi fields were provided globally, we do NOT store plaintext wifi password in system table. Return accepted.
-    if (wifiSSID || wifiPassword) {
-      console.warn('Global wifi update requested without device_id. Not storing wifi password globally for security. Provide device_id to perform wifi update per-device.');
-      return res.status(400).json({ success: false, message: 'Provide device_id to perform wifi update on a specific device' });
-    }
-
-    return res.json({ success: true, message: 'Remote config updated', data: { sensorThreshold, soundEnabled, lightsEnabled } });
-  } catch (err) {
-    console.error('Remote config update error:', err && err.message ? err.message : err);
-    res.status(500).json({ success: false, message: 'Failed to update remote config' });
-  }
-};
-
 module.exports = {
   login,
   getDashboardSummary,
@@ -1071,10 +859,31 @@ module.exports = {
   addAnimal,
   updateAnimal,
   deleteAnimal,
-  resolveAlert,
-  updateAnimalLocation,
-  deleteAllAlerts,
-  getCurrentUser,
-  logout,
-  updateRemoteConfig
+  resolveAlert
+  ,updateAnimalLocation,
+  deleteAllAlerts
+};
+
+// Delete (resolve) all alerts for the farm - admin only
+const deleteAllAlerts = async (req, res) => {
+  try {
+    const user = req.user || {};
+    // Require admin role for this destructive action
+    if (!user.role || user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Forbidden: admin role required' });
+    }
+
+    const farmId = 1; // default farm
+    // Mark all active alerts as resolved (safer than hard delete)
+    const updater = await executeQuery(
+      `UPDATE alerts SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP, resolved_by = ? WHERE farm_id = ? AND status <> 'resolved'`,
+      [user.id || null, farmId]
+    );
+    if (!updater.success) return res.status(500).json({ success: false, message: 'Failed to clear alerts' });
+
+    return res.json({ success: true, message: 'All alerts cleared' });
+  } catch (err) {
+    console.error('Delete all alerts error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
 };

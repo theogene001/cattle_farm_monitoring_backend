@@ -212,68 +212,6 @@ router.get('/ping', (req, res) => {
   res.json({ success: true, message: 'device route is reachable' });
 });
 
-// Device: fetch pending commands for this device
-// GET /api/v1/device/commands?device_id=123
-router.get('/commands', async (req, res) => {
-  try {
-    const deviceId = req.query.device_id ? Number(req.query.device_id) : null;
-    const apiKey = req.headers['x-api-key'] || req.query.api_key || null;
-    if (!deviceId || !apiKey) return res.status(400).json({ success: false, message: 'device_id and x-api-key are required' });
-
-    // Validate device api key if devices table has device_api_key column
-    const devRes = await executeQuery('SELECT id FROM collars WHERE id = ? AND (device_api_key IS NULL OR device_api_key = ? OR ? = "dev-bypass") LIMIT 1', [deviceId, apiKey, process.env.DEV_BYPASS_API_KEY || '']);
-    if (!devRes.success || devRes.data.length === 0) return res.status(403).json({ success: false, message: 'Invalid device or api key' });
-
-    const rows = await executeQuery(
-      `SELECT id, device_id, command_type, payload, status, retry_count, expires_at, created_at
-       FROM device_commands
-       WHERE device_id = ? AND status = 'pending' AND (expires_at IS NULL OR expires_at > NOW())
-       ORDER BY created_at ASC`,
-      [deviceId]
-    );
-    if (!rows.success) return res.status(500).json({ success: false, message: 'Failed to fetch commands' });
-    return res.json({ success: true, data: rows.data || [] });
-  } catch (err) {
-    console.error('Fetch commands error:', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-
-// Device list for UI - return collars (id, serial_number, status)
-router.get('/list', async (req, res) => {
-  try {
-    const rows = await executeQuery('SELECT id, serial_number, model, status FROM collars ORDER BY id ASC', []);
-    if (!rows.success) return res.status(500).json({ success: false, message: 'Failed to fetch collars' });
-    return res.json({ success: true, data: rows.data || [] });
-  } catch (err) {
-    console.error('Fetch collars list error:', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-
-// Device: acknowledge command execution
-// POST /api/v1/device/commands/:id/ack  { status: 'acknowledged', result: 'ok' }
-router.post('/commands/:id/ack', async (req, res) => {
-  try {
-    const cmdId = Number(req.params.id);
-    const apiKey = req.headers['x-api-key'] || req.body.api_key || null;
-    if (!cmdId || !apiKey) return res.status(400).json({ success: false, message: 'command id and x-api-key are required' });
-
-    // Optionally verify command belongs to device by joining with collars (skip for simplicity)
-    const { status = 'acknowledged', result = null } = req.body || {};
-    const upd = await executeQuery('UPDATE device_commands SET status = ?, acked_at = NOW() WHERE id = ?', [status, cmdId]);
-    if (!upd.success) return res.status(500).json({ success: false, message: 'Failed to ack command' });
-    // Optionally log in audit_logs
-    try {
-      await executeQuery('INSERT INTO audit_logs (action, source, details) VALUES (?, ?, ?)', ['device_command_ack', 'device', JSON.stringify({ id: cmdId, status: status, result: result })]);
-    } catch (e) { /* non-fatal */ }
-    return res.json({ success: true, message: 'Command acknowledged' });
-  } catch (err) {
-    console.error('Ack command error:', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
-
 // Export router and handler properly so server can mount handler directly as a fallback
 module.exports = router;
 module.exports.handleAlert = handleAlert;
