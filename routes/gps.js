@@ -234,4 +234,36 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /gps/markers - return current positions suitable for map markers
+router.get('/markers', async (req, res) => {
+  try {
+    const sql = `SELECT cl.animal_id, cl.collar_id, cl.latitude, cl.longitude, cl.recorded_at, cl.battery_level, cl.signal_quality, a.name as animal_name, a.tag_number
+      FROM current_locations cl
+      LEFT JOIN animals a ON a.id = cl.animal_id
+      WHERE cl.latitude IS NOT NULL AND cl.longitude IS NOT NULL`;
+    const result = await executeQuery(sql, []);
+    if (!result.success) return res.status(500).json({ success: false, message: 'Database error', error: result.error });
+    return res.json({ success: true, data: result.data });
+  } catch (err) {
+    console.error('GPS markers fetch error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// GET /gps/markers - return current positions (from current_locations) for map markers
+router.get('/markers', async (req, res) => {
+  try {
+    const sql = `SELECT cl.animal_id, cl.collar_id, cl.latitude, cl.longitude, cl.recorded_at, cl.battery_level, a.name as animal_name, a.tag_number
+      FROM current_locations cl
+      LEFT JOIN animals a ON a.id = cl.animal_id
+      WHERE cl.latitude IS NOT NULL AND cl.longitude IS NOT NULL`;
+    const result = await executeQuery(sql, []);
+    if (!result.success) return res.status(500).json({ success: false, message: 'Database error', error: result.error });
+    return res.json({ success: true, data: result.data });
+  } catch (err) {
+    console.error('GPS markers error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 module.exports = router;
