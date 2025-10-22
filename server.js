@@ -384,6 +384,8 @@ const startServer = async () => {
           status VARCHAR(32) DEFAULT 'active',
           is_functional BOOLEAN DEFAULT TRUE,
           device_api_key VARCHAR(255) DEFAULT NULL,
+          wifi_ssid VARCHAR(255) DEFAULT NULL,
+          wifi_password_encrypted TEXT DEFAULT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

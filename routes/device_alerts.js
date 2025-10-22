@@ -239,6 +239,18 @@ router.get('/commands', async (req, res) => {
   }
 });
 
+// Device list for UI - return collars (id, serial_number, status)
+router.get('/list', async (req, res) => {
+  try {
+    const rows = await executeQuery('SELECT id, serial_number, model, status FROM collars ORDER BY id ASC', []);
+    if (!rows.success) return res.status(500).json({ success: false, message: 'Failed to fetch collars' });
+    return res.json({ success: true, data: rows.data || [] });
+  } catch (err) {
+    console.error('Fetch collars list error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 // Device: acknowledge command execution
 // POST /api/v1/device/commands/:id/ack  { status: 'acknowledged', result: 'ok' }
 router.post('/commands/:id/ack', async (req, res) => {

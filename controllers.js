@@ -922,6 +922,34 @@ const logout = (req, res) => {
 // Remote config update handler
 // - If `device_id` is provided: enqueue device-specific commands into `device_commands` (control / wifi_update)
 // - Otherwise: attempt to update system defaults in `system_settings` (if those columns exist)
+const crypto = require('crypto');
+
+// Simple symmetric encryption using server secret (use KMS for prod)
+const encrypt = (plaintext) => {
+  const key = (process.env.SERVER_SECRET || 'dev-server-secret-please-change').padEnd(32, '0').slice(0,32);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(key), iv);
+  let encrypted = cipher.update(String(plaintext || ''), 'utf8', 'base64');
+  encrypted += cipher.final('base64');
+  return iv.toString('base64') + ':' + encrypted;
+};
+
+const decrypt = (payload) => {
+  try {
+    const key = (process.env.SERVER_SECRET || 'dev-server-secret-please-change').padEnd(32, '0').slice(0,32);
+    const parts = String(payload).split(':');
+    if (parts.length !== 2) return null;
+    const iv = Buffer.from(parts[0], 'base64');
+    const enc = parts[1];
+    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(key), iv);
+    let decrypted = decipher.update(enc, 'base64', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (e) {
+    return null;
+  }
+};
+
 const updateRemoteConfig = async (req, res) => {
   try {
     const {
@@ -956,8 +984,18 @@ const updateRemoteConfig = async (req, res) => {
       }
 
       if (wifiSSID || wifiPassword) {
-        // IMPORTANT: we store wifi payload only transiently in device_commands. Prefer encrypting password in transit.
-        const wifiPayload = { ssid: wifiSSID || null, password: wifiPassword || null };
+        // Persist encrypted Wi-Fi credentials in collars table (short-term storage)
+        try {
+          const encryptedPass = wifiPassword ? encrypt(wifiPassword) : null;
+          const up = await executeQuery('UPDATE collars SET wifi_ssid = ?, wifi_password_encrypted = ? WHERE id = ?', [wifiSSID || null, encryptedPass, device_id]);
+          if (!up.success) {
+            console.warn('Failed to persist wifi creds to collars:', up.error);
+          }
+        } catch (e) {
+          console.warn('Exception when persisting wifi creds:', e && e.message ? e.message : e);
+        }
+
+        const wifiPayload = { ssid: wifiSSID || null, password: wifiPassword ? '[REDACTED]' : null };
         const expiresAt = new Date(now.getTime() + ((expires_hours || 24) * 60 * 60 * 1000));
         const insertRes = await executeQuery(
           'INSERT INTO device_commands (device_id, command_type, payload, expires_at) VALUES (?, ?, ?, ?)',
