@@ -844,26 +844,6 @@ const markAlertRead = async (req, res) => {
   }
 };
 
-module.exports = {
-  login,
-  getDashboardSummary,
-  getAnimals,
-  getVirtualFences,
-  createVirtualFence,
-  updateVirtualFence,
-  deleteVirtualFence,
-  getAnimalLocations,
-  getAlerts,
-  markAlertRead,
-  getAnimalById,
-  addAnimal,
-  updateAnimal,
-  deleteAnimal,
-  resolveAlert
-  ,updateAnimalLocation,
-  deleteAllAlerts
-};
-
 // Delete (resolve) all alerts for the farm - admin only
 const deleteAllAlerts = async (req, res) => {
   try {
@@ -887,3 +867,54 @@ const deleteAllAlerts = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
+
+// Return the current user derived from session or token (optionalAuth may set req.user)
+const getCurrentUser = async (req, res) => {
+  try {
+    if (req.user) {
+      return res.json({ success: true, data: { user: req.user } });
+    }
+    return res.status(401).json({ success: false, message: 'Not authenticated' });
+  } catch (err) {
+    console.error('getCurrentUser error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+module.exports = {
+  login,
+  getDashboardSummary,
+  getAnimals,
+  getVirtualFences,
+  createVirtualFence,
+  updateVirtualFence,
+  deleteVirtualFence,
+  getAnimalLocations,
+  getAlerts,
+  markAlertRead,
+  getAnimalById,
+  addAnimal,
+  updateAnimal,
+  deleteAnimal,
+  resolveAlert,
+  updateAnimalLocation,
+  deleteAllAlerts,
+  getCurrentUser
+};
+
+// Simple logout handler clears session and cookie
+const logout = async (req, res) => {
+  try {
+    if (req.session) {
+      req.session.destroy(() => {});
+    }
+    res.clearCookie(process.env.SESSION_NAME || 'cattlefarm.sid');
+    return res.json({ success: true, message: 'Logged out' });
+  } catch (err) {
+    console.error('Logout error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+// Add logout to exports
+module.exports.logout = logout;

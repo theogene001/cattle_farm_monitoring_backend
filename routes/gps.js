@@ -266,4 +266,39 @@ router.get('/markers', async (req, res) => {
   }
 });
 
+// GET /gps/current - return a single current_locations row
+// Query params: ?animal_id=123  OR ?collar_id=xxx
+// If neither provided, returns the 'raw' current location row (animal_id = 0) if present
+router.get('/current', async (req, res) => {
+  try {
+    const { animal_id, collar_id } = req.query;
+
+    let sql = `SELECT cl.animal_id, cl.collar_id, cl.latitude, cl.longitude, cl.recorded_at, cl.battery_level, cl.signal_quality, a.name as animal_name, a.tag_number
+      FROM current_locations cl
+      LEFT JOIN animals a ON a.id = cl.animal_id
+      WHERE cl.latitude IS NOT NULL AND cl.longitude IS NOT NULL`;
+    const params = [];
+
+    if (animal_id != null) {
+      sql += ' AND cl.animal_id = ? LIMIT 1';
+      params.push(animal_id);
+    } else if (collar_id != null) {
+      sql += ' AND cl.collar_id = ? LIMIT 1';
+      params.push(collar_id);
+    } else {
+      // try to return the special raw row (animal_id=0) first, otherwise the most recently recorded
+      sql += ' AND cl.animal_id = 0 LIMIT 1';
+    }
+
+    const result = await executeQuery(sql, params);
+    if (!result.success) return res.status(500).json({ success: false, message: 'Database error', error: result.error });
+
+    const row = (result.data && result.data.length) ? result.data[0] : null;
+    return res.json({ success: true, data: row });
+  } catch (err) {
+    console.error('GPS current fetch error:', err);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
 module.exports = router;
